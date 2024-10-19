@@ -129,7 +129,7 @@ class DataSet:
     @staticmethod
     def buildFromNumpy( X: np.array, Y: np.array):
         def convert(set : np.array):
-            tens = torch.from_numpy(set)
+            tens = torch.from_numpy(set).float()
             if len(set.shape)==1:
                 tens.unsqueeze_(1)
             return tens
