@@ -124,7 +124,7 @@ class DataSet:
             return tens
 
         #make sure we can run gradient descent on x training data
-        return DataSet(X, Y, convert)
+        return DataSet.buildFromAny(X, Y, convert)
     
     @staticmethod
     def buildFromNumpy( X: np.array, Y: np.array):
@@ -135,7 +135,7 @@ class DataSet:
             return tens
 
         #make sure we can run gradient descent on x training data
-        return DataSet(X, Y, convert)
+        return DataSet.buildFromAny(X, Y, convert)
 
 
     @staticmethod
