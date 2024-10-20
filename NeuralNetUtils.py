@@ -45,9 +45,8 @@ class NeuralNetwork(nn.Module):
             
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
-         # if having issues with cuda device this commented code works as a band-aid at the cost of performance
-        # x = setToCorrectDevice(x)
-        # self.set_to_cuda()
+        x = setToCorrectDevice(x)
+        self.set_to_cuda()
         for l in self.layers: x = l.forward(x)
         return x
     
@@ -239,6 +238,8 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
         if shouldPrint:
             print("Running on CPU")
     
+    def convertOutput(y):
+        return convertToNumpy(y.squeeze(1))
 
     for _ in range(trainingParams.iterations):
         trainingLoss = None
