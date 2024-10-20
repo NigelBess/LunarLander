@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
+import math
 
 class RawData[TState]:
 
@@ -27,6 +28,9 @@ class Layer(nn.Module):
     def set_to_cuda(self):
         self.linear = self.linear.cuda()
         self.activation_function = self.activation_function.cuda()
+        self.linear.bias.cuda()
+        self.linear.weight.cuda()
+        
 
 class NeuralNetwork(nn.Module):
     def __init__(self, input_feature_count:int, layers: nn.ModuleList):
@@ -41,6 +45,8 @@ class NeuralNetwork(nn.Module):
             
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
+        x = setToCorrectDevice(x)
+        self.set_to_cuda()
         for l in self.layers: x = l.forward(x)
         return x
     
@@ -48,10 +54,19 @@ class NeuralNetwork(nn.Module):
         for layer in self.layers:
             layer.set_to_cuda()
 
+    def shape(self):
+        layerCount = len(self.layers)
+        layerSizes = np.zeros((layerCount+1))
+        layerSizes[0] = self.input_feature_count
+        for i in range(layerCount):
+            layerSizes[i+1] = self.layers[i].nodeCount
+        return layerSizes
+    
+    def outputCount(self): return self.layers[len(self.layers)-1].nodeCount
+
 def buildLayers(hiddenLayers=[]):
     layers = nn.ModuleList()
     for i in hiddenLayers: layers.append(Layer(i,nn.ReLU()))
-    layers.append(Layer(1,nn.Sigmoid()))
     return layers
 
 
@@ -79,11 +94,21 @@ def f1Score(prediction:np.array,target:np.array):#arrays should be 0 or 1
     f1 = 2/(1/precision+ 1/recall)
     return f1
 
-
 def convertToNumpy(tens:torch.tensor):
         if torch.cuda.is_available():
             tens = tens.cpu()
         return tens.detach().numpy()
+
+def setToCorrectDevice(tens:torch.tensor):
+        if torch.cuda.is_available():
+            tens = tens.cuda()
+        else:
+            tens = tens.cpu()
+        return tens
+
+def convertToTensor(arr:np.array):
+        tens = torch.tensor(arr)        
+        return setToCorrectDevice(tens)
 
 class TrainingResult():
     def __init__(self):
@@ -163,6 +188,7 @@ class DataSet:
         return self.datasets[setName]
     
 
+
     def set_to_cuda(self):
         with torch.no_grad():
             for setName in self.datasets:
@@ -170,9 +196,29 @@ class DataSet:
                 if set is None: continue
                 self.datasets[setName] = set.cuda()
 
-def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.modules.loss._Loss, trainingParams:TrainingParams)->List[TrainingResult]: 
-    trainData = dataSets[0]
-    print(F"Training Model. Features {trainData.InputCount}, Samples {trainData.Rows}. Iterations: {trainingParams.iterations}")
+def getDevice() -> str:
+    if torch.cuda.is_available():
+        return torch.cuda.get_device_name(torch.cuda.current_device())
+    return"CPU"
+
+def printLoadBar(completionRatio : float):
+    CELLS = 40
+    showingCells = math.floor(completionRatio*CELLS)
+    loadingBar = "["
+    for i in range(CELLS):
+        char = "▯"
+        if i < showingCells:
+            char = "▮"
+        loadingBar += char
+
+    loadingBar += "]"
+    print(loadingBar, end="\r")
+
+
+def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.modules.loss._Loss, trainingParams:TrainingParams, shouldPrint: bool)->List[TrainingResult]: 
+    if shouldPrint:
+        trainData = dataSets[0]
+        print(F"Training Model. Features {trainData.InputCount}, Samples {trainData.Rows}. Iterations: {trainingParams.iterations}")
 
 
 
@@ -186,9 +232,11 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
         for set in dataSets:
             set.set_to_cuda()
         model.set_to_cuda()
-        print(F"Running on {torch.cuda.get_device_name(torch.cuda.current_device())}")
+        if shouldPrint:
+            print(F"Running on {torch.cuda.get_device_name(torch.cuda.current_device())}")
     else:
-        print("Running on CPU")
+        if shouldPrint:
+            print("Running on CPU")
     
     def convertOutput(y):
         return convertToNumpy(y.squeeze(1))
@@ -204,19 +252,7 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
             if trainingLoss is None: trainingLoss = l
             result.loss.append(l.item())
 
-            y = convertOutput(y)
-            yHat = convertOutput(yHat)
-            prediction = getPrediction(yHat)
-
-            acc = accuracy(prediction,y)
-            result.accuracy.append(acc)
-
-            f1 = f1Score(prediction,y)
-            result.f1_score.append(f1)
-        
-
         trainingLoss.backward()
         optimizer.step()
         optimizer.zero_grad()
-    print(f"returning {len(results)} results for {len(dataSets)} data sets")
     return results
