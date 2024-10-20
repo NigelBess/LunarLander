@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 import pandas as pd
 import math
+import copy
 
 class RawData[TState]:
 
@@ -15,13 +16,11 @@ class RawData[TState]:
         self.NextState = nextState
 
 class Layer(nn.Module):
-    def __init__(self, nodeCount: int, activation_function: nn.Module):
+    def __init__(self, inputCount : int ,nodeCount: int, activation_function: nn.Module):
         super().__init__()
         self.nodeCount = nodeCount
         self.activation_function = activation_function
-
-    def setInputCount(self,inputCount:int):
-        self.linear = nn.Linear(inputCount,self.nodeCount)
+        self.linear = nn.Linear(inputCount,self.nodeCount)        
     
     def forward(self,x): return self.activation_function(self.linear(x))
 
@@ -33,20 +32,24 @@ class Layer(nn.Module):
         
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, input_feature_count:int, layers: nn.ModuleList):
+    def __init__(self, input_feature_count : int ,layerNodeCounts : List[int], layerActivationFunctions : List[nn.Module] = None):
         super().__init__()
+        if layerActivationFunctions is None:
+            layerActivationFunctions = [nn.ReLU() for _ in range(len(layerNodeCounts))]
         self.input_feature_count = input_feature_count
-        lastNodeCount = input_feature_count
-        for layer in layers:
-            layer.setInputCount(lastNodeCount)
-            lastNodeCount = layer.nodeCount
 
-        self.layers = layers
-            
+        self.layers = buildLayers(layerNodeCounts,layerActivationFunctions)
+
+    def copy(self) -> 'NeuralNetwork':
+        """
+        Creates a deep copy of the network, including copying all weights and biases
+        """
+        return copy.deepcopy(self)            
 
     def forward(self,x:torch.Tensor) -> torch.Tensor:
-        x = setToCorrectDevice(x)
-        self.set_to_cuda()
+        # if having issues with cuda device this commented code works as a band-aid at the cost of performance
+        # x = setToCorrectDevice(x)
+        # self.set_to_cuda()
         for l in self.layers: x = l.forward(x)
         return x
     
@@ -54,19 +57,24 @@ class NeuralNetwork(nn.Module):
         for layer in self.layers:
             layer.set_to_cuda()
 
-    def shape(self):
+    def shape(self) -> List[int]: # input_count, layer_0_nodes, ... layer_n_nodes (last layer is also the output count)
         layerCount = len(self.layers)
         layerSizes = np.zeros((layerCount+1))
         layerSizes[0] = self.input_feature_count
         for i in range(layerCount):
             layerSizes[i+1] = self.layers[i].nodeCount
         return layerSizes
-    
-    def outputCount(self): return self.layers[len(self.layers)-1].nodeCount
 
-def buildLayers(hiddenLayers=[]):
+    
+    def outputCount(self): 
+        return self.layers[len(self.layers)-1].nodeCount
+
+def buildLayers(input_feature_count : int ,layerNodeCounts : List[int], layerActivationFunctions : List[nn.Module]) -> nn.ModuleList:
     layers = nn.ModuleList()
-    for i in hiddenLayers: layers.append(Layer(i,nn.ReLU()))
+    lastLayerOutputs = input_feature_count
+    for (nodeCount,activation) in zip(layerNodeCounts,layerActivationFunctions): 
+        layers.append(Layer(inputCount=lastLayerOutputs, nodeCount = nodeCount, activation_function = activation))
+        lastLayerOutputs = nodeCount
     return layers
 
 
@@ -106,7 +114,7 @@ def setToCorrectDevice(tens:torch.tensor):
             tens = tens.cpu()
         return tens
 
-def convertToTensor(arr:np.array):
+def convertToTensor(arr:np.array) -> torch.Tensor:
         tens = torch.tensor(arr)        
         return setToCorrectDevice(tens)
 
@@ -238,8 +246,6 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
         if shouldPrint:
             print("Running on CPU")
     
-    def convertOutput(y):
-        return convertToNumpy(y.squeeze(1))
 
     for _ in range(trainingParams.iterations):
         trainingLoss = None
@@ -256,3 +262,13 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
         optimizer.step()
         optimizer.zero_grad()
     return results
+
+class ReplayBuffer:
+    def __init__(self,S : np.array, A : np.array, R : np.array, S_Prime: np.array):
+        self.S = convertToTensor(S)
+        self.A = convertToTensor(A)
+        self.R = convertToTensor(R)
+        self.S_Prime = convertToTensor(S_Prime)
+    @property
+    def Rows(self):
+        return self.S.shape[0]
