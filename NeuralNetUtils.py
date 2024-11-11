@@ -32,13 +32,14 @@ class Layer(nn.Module):
         
 
 class NeuralNetwork(nn.Module):
-    def __init__(self, input_feature_count : int ,layerNodeCounts : List[int], layerActivationFunctions : List[nn.Module] = None):
+    def __init__(self, input_feature_count : int , layerNodeCounts : List[int], layerActivationFunctions : List[nn.Module]):
         super().__init__()
         if layerActivationFunctions is None:
             layerActivationFunctions = [nn.ReLU() for _ in range(len(layerNodeCounts))]
         self.input_feature_count = input_feature_count
 
-        self.layers = buildLayers(layerNodeCounts,layerActivationFunctions)
+        self.layers = buildLayers(input_feature_count,layerNodeCounts,layerActivationFunctions)
+        self.set_to_correct_device()
 
     def copy(self) -> 'NeuralNetwork':
         """
@@ -52,6 +53,12 @@ class NeuralNetwork(nn.Module):
         # self.set_to_cuda()
         for l in self.layers: x = l.forward(x)
         return x
+    
+    def set_to_correct_device(self):
+        if torch.cuda.is_available():
+            self.set_to_cuda()
+        else:
+            pass #TODO: set back to cpu if we were already on cuda (weird edge case)
     
     def set_to_cuda(self):
         for layer in self.layers:
@@ -73,6 +80,8 @@ def buildLayers(input_feature_count : int ,layerNodeCounts : List[int], layerAct
     layers = nn.ModuleList()
     lastLayerOutputs = input_feature_count
     for (nodeCount,activation) in zip(layerNodeCounts,layerActivationFunctions): 
+        if activation is None:
+            activation = nn.Identity()
         layers.append(Layer(inputCount=lastLayerOutputs, nodeCount = nodeCount, activation_function = activation))
         lastLayerOutputs = nodeCount
     return layers
@@ -115,7 +124,8 @@ def setToCorrectDevice(tens:torch.tensor):
         return tens
 
 def convertToTensor(arr:np.array) -> torch.Tensor:
-        tens = torch.tensor(arr)        
+        print(arr.shape)
+        tens = torch.tensor(arr.astype(np.float32))        
         return setToCorrectDevice(tens)
 
 class TrainingResult():
@@ -264,6 +274,10 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
     return results
 
 class ReplayBuffer:
+    # S: n rows, each row contains m values, where m is the number of state variables
+    # A: n rows, each row contains 1 value: the action taken
+    # R n rows, each row contains 1 value: the received reward at the current state
+    # S': n rows, each row contains m values
     def __init__(self,S : np.array, A : np.array, R : np.array, S_Prime: np.array):
         self.S = convertToTensor(S)
         self.A = convertToTensor(A)
@@ -272,3 +286,8 @@ class ReplayBuffer:
     @property
     def Rows(self):
         return self.S.shape[0]
+    
+    def generate_X(self):
+        print(self.S.shape)
+        print(self.A.shape)
+        return torch.hstack((self.S,self.A))
