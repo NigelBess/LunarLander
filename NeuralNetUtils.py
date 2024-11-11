@@ -290,6 +290,13 @@ class ReplayBuffer:
     
     def build_dataset(self, target_network:NeuralNetwork, gamma: float):
         X = self.S #S
-        q_s_prime = target_network.forward(X) # n x q tensor where n = number of rows and q = number of action possibilities
-        Y = self.R + q_s_prime * gamma
+        modelForward = target_network.forward(self.S_Prime) # n x a tensor where n = number of rows and a = number of action possibilities
+        # we need to turn modelForward into a 
+        Y = np.zeros((self.Rows,1))
+        for i in range(self.Rows):
+            s = self.S[i,:]
+            
+            q_s_prime = modelForward.max()
+            Y[i] = q_s_prime      
+       
         return DataSet(X,Y)
