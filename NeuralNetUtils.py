@@ -124,7 +124,6 @@ def setToCorrectDevice(tens:torch.tensor):
         return tens
 
 def convertToTensor(arr:np.array) -> torch.Tensor:
-        print(arr.shape)
         tens = torch.tensor(arr.astype(np.float32))        
         return setToCorrectDevice(tens)
 
@@ -205,6 +204,14 @@ class DataSet:
         self.assertSetExistence(setName)
         return self.datasets[setName]
     
+    def sub_sample(self, ratio: float) -> 'DataSet':
+        indexCount = (int)(ratio * self.Rows)
+        indicesRandomlyOrdered = torch.randperm(self.Rows)
+        indices = indicesRandomlyOrdered[:indexCount]
+        X = self.get(DataSet.X)[indices,:].detach()
+        Y = self.get(DataSet.Y)[indices,:].detach()
+        return DataSet(X,Y)
+
 
 
     def set_to_cuda(self):
@@ -233,22 +240,17 @@ def printLoadBar(completionRatio : float):
     print(loadingBar, end="\r")
 
 
-def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.modules.loss._Loss, trainingParams:TrainingParams, shouldPrint: bool)->List[TrainingResult]: 
+def trainModel(trainData:DataSet, model:NeuralNetwork, loss_function:nn.modules.loss._Loss, trainingParams:TrainingParams, shouldPrint: bool)->TrainingResult:
+    model.zero_grad()
     if shouldPrint:
-        trainData = dataSets[0]
         print(F"Training Model. Features {trainData.InputCount}, Samples {trainData.Rows}. Iterations: {trainingParams.iterations}")
 
 
 
-    results:List[TrainingResult] = []
-    for _ in dataSets:
-        results.append(TrainingResult())
-
     optimizer = torch.optim.Adam(params=model.parameters(),lr=trainingParams.learningRate,weight_decay=trainingParams.regularizationConstant)
 
     if torch.cuda.is_available():
-        for set in dataSets:
-            set.set_to_cuda()
+        trainData.set_to_cuda()
         model.set_to_cuda()
         if shouldPrint:
             print(F"Running on {torch.cuda.get_device_name(torch.cuda.current_device())}")
@@ -256,22 +258,21 @@ def trainModel(dataSets:List[DataSet], model:NeuralNetwork, loss_function:nn.mod
         if shouldPrint:
             print("Running on CPU")
     
+    result = TrainingResult()
 
     for _ in range(trainingParams.iterations):
-        trainingLoss = None
-        for (set,result) in  zip(dataSets,results):
-            x = set.get(DataSet.X)
-            y = set.get(DataSet.Y)
-            yHat = model.forward(x)
+        x = trainData.get(DataSet.X)
+        y = trainData.get(DataSet.Y)
+        yHat = model.forward(x)
 
-            l = loss_function(yHat,y)
-            if trainingLoss is None: trainingLoss = l
-            result.loss.append(l.item())
+        l = loss_function(yHat,y)
 
-        trainingLoss.backward()
+        result.loss.append(l.item())
+
+        l.backward()
         optimizer.step()
         optimizer.zero_grad()
-    return results
+    return result
 
 class ReplayBuffer:
     # S: n rows, each row contains m values, where m is the number of state variables
@@ -287,7 +288,8 @@ class ReplayBuffer:
     def Rows(self):
         return self.S.shape[0]
     
-    def generate_X(self):
-        print(self.S.shape)
-        print(self.A.shape)
-        return torch.hstack((self.S,self.A))
+    def build_dataset(self, target_network:NeuralNetwork, gamma: float):
+        X = self.S #S
+        q_s_prime = target_network.forward(X) # n x q tensor where n = number of rows and q = number of action possibilities
+        Y = self.R + q_s_prime * gamma
+        return DataSet(X,Y)
